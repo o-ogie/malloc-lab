@@ -55,6 +55,7 @@ team_t team = {
 static void* extend_heap(size_t words);
 static void* coalesce(void *bp);
 static void* heap_listp;
+static void* N_bp;
 ///////////////////////////////////////////
 /* rounds up to the nearest multiple of ALIGNMENT */
 #define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
@@ -70,11 +71,13 @@ int mm_init(void)
     if((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1){
         return -1;
     }
+
     PUT(heap_listp,0);
     PUT(heap_listp + (1*WSIZE) , PACK(DSIZE, 1));
     PUT(heap_listp + (2*WSIZE) , PACK(DSIZE, 1));
     PUT(heap_listp + (3*WSIZE) , PACK(0, 1));
     heap_listp += (2*WSIZE);
+    N_bp=heap_listp;
 
     if(extend_heap(CHUNKSIZE/WSIZE) == NULL){
         return -1;
@@ -86,8 +89,22 @@ static void *find_fit(size_t asize){
 
     void *bp;
 
-    for(bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)){
+    // for(bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)){
+    //     if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))){
+    //         return bp;
+    //     }
+    // }
+
+    for(bp=N_bp; GET_SIZE(HDRP(bp))>0; bp=NEXT_BLKP(bp)){
         if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))){
+            N_bp = bp;
+            return bp;
+        }
+    }
+
+    for(bp = heap_listp; bp<N_bp; bp = NEXT_BLKP(bp)){
+        if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))){
+            N_bp = bp;
             return bp;
         }
     }
@@ -185,23 +202,32 @@ static void *coalesce(void *bp){
     }
 
     else if(prev_alloc && !next_alloc){
+        void* oldbp = NEXT_BLKP(bp);
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
         PUT(HDRP(bp), PACK(size, 0));
         PUT(FTRP(bp), PACK(size, 0));
+
+        if(oldbp==N_bp) N_bp=bp;
     }
 
     else if(!prev_alloc && next_alloc){
+        void* oldbp=bp;
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
         PUT(FTRP(bp) , PACK(size,0));
         PUT(HDRP(PREV_BLKP(bp)) , PACK(size, 0));
         bp = PREV_BLKP(bp);
+
+        if(oldbp==N_bp)N_bp=bp;
     }
 
     else {
+        void* oldbp = bp;
+        void* oldNext = NEXT_BLKP(bp);
         size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
         PUT(HDRP(PREV_BLKP(bp)) , PACK(size,0));
         PUT(FTRP(NEXT_BLKP(bp)) , PACK(size,0));
         bp = PREV_BLKP(bp);
+        if(oldbp==N_bp || oldNext==N_bp) N_bp=bp;
     }
 
     return bp;
